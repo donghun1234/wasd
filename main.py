@@ -44,6 +44,9 @@ game_code = """
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
+        // 로컬 스토리지에서 최고 기록 불러오기 (없으면 0.0)
+        let highScore = parseFloat(localStorage.getItem('dodge_high_score')) || 0.0;
+
         // 플레이어 설정
         const player = {
             x: canvas.width / 2,
@@ -60,7 +63,6 @@ game_code = """
         let bullets = [];
         let score = 0;
         let gameOver = false;
-        let animationFrameId;
         let startTime = Date.now();
 
         // 키 이벤트 리스너
@@ -80,7 +82,6 @@ game_code = """
             if (gameOver) return;
             
             let x, y;
-            // 화면 4개 테두리 중 무작위 위치에서 생성
             if (Math.random() < 0.5) {
                 x = Math.random() < 0.5 ? 0 : canvas.width;
                 y = Math.random() * canvas.height;
@@ -89,9 +90,8 @@ game_code = """
                 y = Math.random() < 0.5 ? 0 : canvas.height;
             }
 
-            // 플레이어 방향으로 날아가도록 각도 계산
             const angle = Math.atan2(player.y - y, player.x - x);
-            const speed = 2 + Math.random() * 2 + (score / 10); // 시간이 지날수록 약간씩 빨라짐
+            const speed = 2 + Math.random() * 2 + (score / 10);
 
             bullets.push({
                 x: x,
@@ -103,7 +103,6 @@ game_code = """
             });
         }
 
-        // 총알 생성 주기 설정
         setInterval(spawnBullet, 300);
 
         // 게임 리셋
@@ -121,7 +120,7 @@ game_code = """
         function update() {
             if (gameOver) return;
 
-            // 스코어 계산 (생존 시간)
+            // 현재 스코어 계산 (생존 시간)
             score = Math.floor((Date.now() - startTime) / 100) / 10;
 
             // 플레이어 이동
@@ -153,10 +152,15 @@ game_code = """
                 ctx.fill();
                 ctx.closePath();
 
-                // 충돌 검사 (두 원 사이의 거리)
+                // 충돌 검사
                 const dist = Math.hypot(player.x - b.x, player.y - b.y);
                 if (dist < player.radius + b.radius) {
                     gameOver = true;
+                    // 최고 기록 업데이트 및 로컬스토리지 저장
+                    if (score > highScore) {
+                        highScore = score;
+                        localStorage.setItem('dodge_high_score', highScore.toFixed(1));
+                    }
                 }
 
                 // 화면 밖으로 나간 총알 제거
@@ -165,10 +169,13 @@ game_code = """
                 }
             }
 
-            // 스코어 표시
+            // 현재 점수 및 최고 점수 상단 표시
             ctx.fillStyle = '#ffffff';
             ctx.font = '16px sans-serif';
             ctx.fillText(`TIME: ${score.toFixed(1)}s`, 15, 30);
+            
+            ctx.fillStyle = '#ffbd45';
+            ctx.fillText(`BEST: ${highScore.toFixed(1)}s`, 15, 52);
 
             if (gameOver) {
                 ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
@@ -177,15 +184,20 @@ game_code = """
                 ctx.fillStyle = '#ff4b4b';
                 ctx.font = 'bold 30px sans-serif';
                 ctx.textAlign = 'center';
-                ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 10);
+                ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 20);
 
                 ctx.fillStyle = '#ffffff';
                 ctx.font = '16px sans-serif';
-                ctx.fillText(`최종 생존 시간: ${score.toFixed(1)}초`, canvas.width / 2, canvas.height / 2 + 25);
-                ctx.fillText('R 키를 눌러 다시 시작', canvas.width / 2, canvas.height / 2 + 55);
+                ctx.fillText(`최종 생존 시간: ${score.toFixed(1)}초`, canvas.width / 2, canvas.height / 2 + 15);
+                
+                ctx.fillStyle = '#ffbd45';
+                ctx.fillText(`최고 기록: ${highScore.toFixed(1)}초`, canvas.width / 2, canvas.height / 2 + 40);
+
+                ctx.fillStyle = '#8b949e';
+                ctx.fillText('R 키를 눌러 다시 시작', canvas.width / 2, canvas.height / 2 + 75);
                 ctx.textAlign = 'start';
             } else {
-                animationFrameId = requestAnimationFrame(update);
+                requestAnimationFrame(update);
             }
         }
 
@@ -196,7 +208,7 @@ game_code = """
 </html>
 """
 
-# Streamlit 구성요소로 HTML 게임 탑재
+# Streamlit 컴포넌트로 게임 탑재
 components.html(game_code, height=480)
 
 # 가이드 섹션
