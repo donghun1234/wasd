@@ -3,8 +3,8 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Streamlit WASD 닷지 게임", page_icon="🎮", layout="centered")
 
-st.title("🎮 WASD 다양한 총알 피하기 게임")
-st.caption("방향키 `W`, `A`, `S`, `D`로 조종하여 다양한 특성의 총알들을 피하세요!")
+st.title("🎮 WASD 총알 피하기 게임")
+st.caption("방향키 `W`, `A`, `S`, `D`로 조종하고, `E` 키를 눌러 보호막을 펼치세요!")
 
 # 1. 난이도 선택 UI
 difficulty = st.radio(
@@ -55,7 +55,7 @@ game_code = f"""
 </head>
 <body>
     <canvas id="gameCanvas" width="500" height="400"></canvas>
-    <div class="info">이동: <b>W, A, S, D</b> | 재시작: <b>R</b></div>
+    <div class="info">이동: <b>W, A, S, D</b> | 보호막: <b>E</b> | 재시작: <b>R</b></div>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
@@ -79,6 +79,15 @@ game_code = f"""
             color: '#00d4ff'
         }};
 
+        // 보호막 스킬 설정
+        const shield = {{
+            active: false,
+            duration: 3000,   // 보호막 지속 시간 (3초)
+            cooldown: 10000,  // 쿨다운 시간 (10초)
+            lastUsed: -10000, // 게임 시작 후 바로 쓸 수 있게 세팅
+            activeUntil: 0
+        }};
+
         // 키 상태 관리
         const keys = {{ w: false, a: false, s: false, d: false }};
 
@@ -92,6 +101,7 @@ game_code = f"""
         window.addEventListener('keydown', (e) => {{
             const key = e.key.toLowerCase();
             if (['w', 'a', 's', 'd'].includes(key)) keys[key] = true;
+            if (key === 'e' && !gameOver) triggerShield();
             if (key === 'r' && gameOver) resetGame();
         }});
 
@@ -100,7 +110,17 @@ game_code = f"""
             if (['w', 'a', 's', 'd'].includes(key)) keys[key] = false;
         }});
 
-        // 총알 생성 함수 (특성/타입 랜덤)
+        // 보호막 발동 함수
+        function triggerShield() {{
+            const now = Date.now();
+            if (now - shield.lastUsed >= shield.cooldown) {{
+                shield.active = true;
+                shield.lastUsed = now;
+                shield.activeUntil = now + shield.duration;
+            }}
+        }}
+
+        // 총알 생성 함수
         function spawnBullet() {{
             if (gameOver) return;
             
@@ -122,24 +142,20 @@ game_code = f"""
             let color = '#ff4b4b';
 
             if (rand < 0.4) {{
-                // 1. 일반 총알 (빨강 원)
                 type = 'normal';
                 radius = 5;
                 color = '#ff4b4b';
             }} else if (rand < 0.65) {{
-                // 2. 고속 미니 총알 (노랑 작은 원)
                 type = 'fast';
                 radius = 3;
                 speed *= 1.6;
                 color = '#ffee55';
             }} else if (rand < 0.85) {{
-                // 3. 대형 왕총알 (주황 큰 원)
                 type = 'big';
                 radius = 12;
                 speed *= 0.65;
                 color = '#ff9900';
             }} else {{
-                // 4. 유도 다이아몬드 총알 (보라색 네모/다이아몬드)
                 type = 'homing';
                 radius = 6;
                 speed *= 0.8;
@@ -168,11 +184,13 @@ game_code = f"""
             bullets = [];
             score = 0;
             gameOver = false;
+            shield.active = false;
+            shield.lastUsed = -10000;
             startTime = Date.now();
             update();
         }}
 
-        // 다이아몬드(사각형) 그리기 함수
+        // 다이아몬드 그리기 함수
         function drawDiamond(x, y, size, angle, color) {{
             ctx.save();
             ctx.translate(x, y);
@@ -189,7 +207,13 @@ game_code = f"""
         function update() {{
             if (gameOver) return;
 
-            score = Math.floor((Date.now() - startTime) / 100) / 10;
+            const now = Date.now();
+            score = Math.floor((now - startTime) / 100) / 10;
+
+            // 보호막 상태 업데이트
+            if (shield.active && now > shield.activeUntil) {{
+                shield.active = false;
+            }}
 
             // 플레이어 이동
             if (keys.w && player.y - player.radius > 0) player.y -= player.speed;
@@ -207,15 +231,25 @@ game_code = f"""
             ctx.fill();
             ctx.closePath();
 
+            // 보호막 그리기 (활성화 상태 시)
+            if (shield.active) {{
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, player.radius + 8, 0, Math.PI * 2);
+                ctx.strokeStyle = '#00ffff';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                ctx.fillStyle = 'rgba(0, 255, 255, 0.2)';
+                ctx.fill();
+                ctx.closePath();
+            }}
+
             // 총알 이동 및 충돌 체크
             for (let i = bullets.length - 1; i >= 0; i--) {{
                 const b = bullets[i];
 
-                // 유도 총알 패턴 처리 (조금씩 플레이어를 향해 꺾임)
                 if (b.type === 'homing') {{
                     const targetAngle = Math.atan2(player.y - b.y, player.x - b.x);
                     const currentAngle = Math.atan2(b.dy, b.dx);
-                    // 서서히 각도 변경
                     const newAngle = currentAngle + (targetAngle - currentAngle) * 0.03;
                     b.dx = Math.cos(newAngle) * b.speed;
                     b.dy = Math.sin(newAngle) * b.speed;
@@ -225,7 +259,6 @@ game_code = f"""
                 b.x += b.dx;
                 b.y += b.dy;
 
-                // 총알 그리기 (타입별 분기)
                 if (b.type === 'homing') {{
                     drawDiamond(b.x, b.y, b.radius, b.rotation, b.color);
                 }} else {{
@@ -236,17 +269,18 @@ game_code = f"""
                     ctx.closePath();
                 }}
 
-                // 충돌 검사
+                // 충돌 검사 (보호막 비활성화 상태일 때만 사망)
                 const dist = Math.hypot(player.x - b.x, player.y - b.y);
                 if (dist < player.radius + b.radius) {{
-                    gameOver = true;
-                    if (score > highScore) {{
-                        highScore = score;
-                        localStorage.setItem(storageKey, highScore.toFixed(1));
+                    if (!shield.active) {{
+                        gameOver = true;
+                        if (score > highScore) {{
+                            highScore = score;
+                            localStorage.setItem(storageKey, highScore.toFixed(1));
+                        }}
                     }}
                 }}
 
-                // 화면 밖으로 나간 총알 제거
                 if (b.x < -20 || b.x > canvas.width + 20 || b.y < -20 || b.y > canvas.height + 20) {{
                     bullets.splice(i, 1);
                 }}
@@ -259,6 +293,28 @@ game_code = f"""
             
             ctx.fillStyle = '#ffbd45';
             ctx.fillText(`BEST: ${{highScore.toFixed(1)}}s`, 15, 52);
+
+            // 보호막 쿨다운 게이지 표시
+            const timeSinceLastUsed = now - shield.lastUsed;
+            const cooldownProgress = Math.min(1, timeSinceLastUsed / shield.cooldown);
+            
+            ctx.fillStyle = '#333333';
+            ctx.fillRect(15, 65, 100, 8);
+            
+            if (shield.active) {{
+                const activeProgress = (shield.activeUntil - now) / shield.duration;
+                ctx.fillStyle = '#00ffff';
+                ctx.fillRect(15, 65, 100 * activeProgress, 8);
+                ctx.fillStyle = '#00ffff';
+                ctx.font = '10px sans-serif';
+                ctx.fillText('SHIELD ACTIVE', 122, 73);
+            }} else {{
+                ctx.fillStyle = cooldownProgress === 1 ? '#00d4ff' : '#ffbd45';
+                ctx.fillRect(15, 65, 100 * cooldownProgress, 8);
+                ctx.fillStyle = '#8b949e';
+                ctx.font = '10px sans-serif';
+                ctx.fillText(cooldownProgress === 1 ? 'SHIELD READY (E)' : 'CHARGING...', 122, 73);
+            }}
 
             if (gameOver) {{
                 ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
@@ -297,10 +353,8 @@ components.html(game_code, height=480)
 # 가이드 섹션
 st.markdown("""
 ---
-### 🕹️ 조작법 및 총알 종류
+### 🕹️ 조작법 및 스킬
 * **`W, A, S, D`** : 이동 | **`R`** : 재시작
-* 🔴 **일반 총알**: 기본 속도 및 크기
-* 🟡 **고속 총알**: 작고 빠르게 날아옴
-* 🟠 **대형 총알**: 느리지만 피하기 힘든 큰 총알
-* 🟣 **유도 다이아몬드**: 플레이어를 서서히 쫓아오는 회전 총알
+* **`E`** : **보호막 스킬** (3초간 무적 / 쿨타임 10초)
+* 좌측 상단의 게이지를 통해 보호막 남은 시간 및 충전 상태를 확인할 수 있습니다.
 """)
