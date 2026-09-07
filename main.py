@@ -15,15 +15,15 @@ with col1:
 with col2:
     difficulty = st.radio(
         "🎯 난이도 선택",
-        ["쉬움 (Easy)", "보통 (Normal)", "어려움 (Hard - 15초 생존!)"],
-        index=2
+        ["쉬움 (Easy)", "보통 (Normal - 10초 보스 / 20초 클리어!)", "어려움 (Hard - 15초 생존!)"],
+        index=1
     )
 
 # 난이도별 게임 변수 설정
 difficulty_settings = {
-    "쉬움 (Easy)": {"spawn_rate": 400, "base_speed": 1.5, "speed_inc": 0.05, "key": "easy", "target_time": "null"},
-    "보통 (Normal)": {"spawn_rate": 250, "base_speed": 2.2, "speed_inc": 0.1, "key": "normal", "target_time": "null"},
-    "어려움 (Hard - 15초 생존!)": {"spawn_rate": 150, "base_speed": 3.0, "speed_inc": 0.2, "key": "hard", "target_time": "15.0"}
+    "쉬움 (Easy)": {"spawn_rate": 400, "base_speed": 1.5, "speed_inc": 0.05, "key": "easy", "target_time": "null", "has_boss": "false"},
+    "보통 (Normal - 10초 보스 / 20초 클리어!)": {"spawn_rate": 250, "base_speed": 2.2, "speed_inc": 0.1, "key": "normal", "target_time": "20.0", "has_boss": "true"},
+    "어려움 (Hard - 15초 생존!)": {"spawn_rate": 150, "base_speed": 3.0, "speed_inc": 0.2, "key": "hard", "target_time": "15.0", "has_boss": "false"}
 }
 
 cfg = difficulty_settings[difficulty]
@@ -32,6 +32,7 @@ base_speed_val = cfg['base_speed']
 speed_inc_val = cfg['speed_inc']
 key_val = cfg['key']
 target_time_val = cfg['target_time']
+has_boss_val = cfg['has_boss']
 
 # 2. HTML/JS 기반 Canvas 게임 코드
 game_code = f"""
@@ -75,13 +76,14 @@ game_code = f"""
         const coinStorageKey = 'dodge_total_coins';
 
         let highScore = parseFloat(localStorage.getItem(storageKey)) || 0.0;
-        let coinCount = parseInt(localStorage.getItem(coinStorageKey)) || 0; // 누적 코인 로드
+        let coinCount = parseInt(localStorage.getItem(coinStorageKey)) || 0;
 
         const spawnInterval = {spawn_rate_val};
         const baseBulletSpeed = {base_speed_val};
         const speedInc = {speed_inc_val};
         const targetTime = {target_time_val};
         const maxLives = {lives_setting};
+        const hasBoss = {has_boss_val};
 
         let lives = maxLives;
         let invulnerable = false;
@@ -91,9 +93,21 @@ game_code = f"""
         let freezeActive = false;
         let freezeUntil = 0;
 
+        // 보스 정보
+        const boss = {{
+            active: false,
+            x: canvas.width / 2,
+            y: -50,
+            targetY: 70,
+            radius: 24,
+            dx: 2,
+            lastAimedShot: 0,
+            lastRingShot: 0
+        }};
+
         const player = {{
             x: canvas.width / 2,
-            y: canvas.height / 2,
+            y: canvas.height - 50,
             radius: 8,
             speed: 4,
             color: '#00d4ff'
@@ -140,9 +154,9 @@ game_code = f"""
             const now = Date.now();
             if (coinCount >= 5 && !freezeActive) {{
                 coinCount -= 5;
-                localStorage.setItem(coinStorageKey, coinCount); // 사용 후 누적 코인 저장
+                localStorage.setItem(coinStorageKey, coinCount);
                 freezeActive = true;
-                freezeUntil = now + 2000; // 2초간 정지
+                freezeUntil = now + 2000;
             }}
         }}
 
@@ -215,7 +229,7 @@ game_code = f"""
 
         function resetGame() {{
             player.x = canvas.width / 2;
-            player.y = canvas.height / 2;
+            player.y = canvas.height - 50;
             bullets = [];
             coins = [];
             score = 0;
@@ -226,6 +240,11 @@ game_code = f"""
             gameClear = false;
             shield.active = false;
             shield.lastUsed = -10000;
+            boss.active = false;
+            boss.x = canvas.width / 2;
+            boss.y = -50;
+            boss.lastAimedShot = 0;
+            boss.lastRingShot = 0;
             startTime = Date.now();
             update();
         }}
@@ -239,6 +258,86 @@ game_code = f"""
             ctx.rect(-size, -size, size * 2, size * 2);
             ctx.fill();
             ctx.closePath();
+            ctx.restore();
+        }}
+
+        function updateBoss(now) {{
+            if (!hasBoss) return;
+
+            // 10초 이상 지나면 보스 등판
+            if (score >= 10.0 && !boss.active) {{
+                boss.active = true;
+            }}
+
+            if (!boss.active) return;
+
+            // 보스 등장 애니메이션
+            if (boss.y < boss.targetY) {{
+                boss.y += 2;
+            }} else {{
+                // 좌우 이동 패턴
+                boss.x += boss.dx;
+                if (boss.x - boss.radius < 20 || boss.x + boss.radius > canvas.width - 20) {{
+                    boss.dx *= -1;
+                }}
+            }}
+
+            // 정지 상태일 때는 공격 멈춤
+            if (freezeActive) return;
+
+            // 패턴 1: 조준 사격 (0.8초 주기)
+            if (now - boss.lastAimedShot >= 800) {{
+                boss.lastAimedShot = now;
+                const angle = Math.atan2(player.y - boss.y, player.x - boss.x);
+                bullets.push({{
+                    x: boss.x,
+                    y: boss.y,
+                    dx: Math.cos(angle) * 3.5,
+                    dy: Math.sin(angle) * 3.5,
+                    radius: 7,
+                    color: '#ff0055',
+                    type: 'boss_aimed'
+                }});
+            }}
+
+            // 패턴 2: 360도 전방위 탄막 방출 (2.5초 주기)
+            if (now - boss.lastRingShot >= 2500) {{
+                boss.lastRingShot = now;
+                const count = 8;
+                for (let i = 0; i < count; i++) {{
+                    const angle = (Math.PI * 2 / count) * i;
+                    bullets.push({{
+                        x: boss.x,
+                        y: boss.y,
+                        dx: Math.cos(angle) * 2.5,
+                        dy: Math.sin(angle) * 2.5,
+                        radius: 6,
+                        color: '#aa00ff',
+                        type: 'boss_ring'
+                    }});
+                }}
+            }}
+        }}
+
+        function drawBoss() {{
+            if (!boss.active) return;
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2);
+            ctx.fillStyle = freezeActive ? '#555555' : '#8a2be2';
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            ctx.closePath();
+
+            // 보스 눈 그리기
+            ctx.fillStyle = '#ff0000';
+            ctx.beginPath();
+            ctx.arc(boss.x - 8, boss.y - 4, 4, 0, Math.PI * 2);
+            ctx.arc(boss.x + 8, boss.y - 4, 4, 0, Math.PI * 2);
+            ctx.fill();
             ctx.restore();
         }}
 
@@ -274,6 +373,8 @@ game_code = f"""
             if (keys.a && player.x - player.radius > 0) player.x -= player.speed;
             if (keys.d && player.x + player.radius < canvas.width) player.x += player.speed;
 
+            updateBoss(now);
+
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             // 시간 정지 배경 효과
@@ -297,10 +398,12 @@ game_code = f"""
                 const dist = Math.hypot(player.x - c.x, player.y - c.y);
                 if (dist < player.radius + c.radius) {{
                     coinCount++;
-                    localStorage.setItem(coinStorageKey, coinCount); // 코인 습득 즉시 누적 저장
+                    localStorage.setItem(coinStorageKey, coinCount);
                     coins.splice(i, 1);
                 }}
             }}
+
+            drawBoss();
 
             // 플레이어 그리기
             if (!invulnerable || Math.floor(now / 100) % 2 === 0) {{
@@ -433,7 +536,7 @@ game_code = f"""
 
                 ctx.fillStyle = '#ffffff';
                 ctx.font = '16px sans-serif';
-                ctx.fillText('어려움 모드 15초 생존 성공!', canvas.width / 2, canvas.height / 2 + 15);
+                ctx.fillText('보스 탄막을 뚫고 20초 생존 성공!', canvas.width / 2, canvas.height / 2 + 15);
 
                 ctx.fillStyle = '#8b949e';
                 ctx.fillText('R 키를 눌러 다시 도전', canvas.width / 2, canvas.height / 2 + 60);
@@ -475,6 +578,8 @@ st.markdown("""
 ### 🕹️ 조작법 및 규칙
 * **`W, A, S, D`** : 이동 | **`R`** : 재시작
 * **`E`** : **보호막 스킬** (3초간 무적 / 쿨타임 10초)
-* **`Space` 또는 `Q`** : **시간 정지 스킬** (🪙 코인 5개 사용 시 2초간 모든 총알 멈춤)
-* **🪙 누적 코인**: 필드의 코인을 먹으면 차곡차곡 누적되어 기록이 남습니다!
+* **`Space` 또는 `Q`** : **시간 정지 스킬** (🪙 코인 5개 사용 시 2초간 보스 포함 모든 총알 멈춤)
+* **👾 보통 난이도 규칙**:
+  * **10초**: 상단에서 보스 등장 (조준 사격 + 360도 전방위 탄막)
+  * **20초**: 생존 시 스테이지 클리어!
 """)
