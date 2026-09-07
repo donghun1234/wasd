@@ -172,7 +172,8 @@ game_code = f"""
         setInterval(spawnCoin, 3000);
 
         function spawnBullet() {{
-            if (gameOver || gameClear || freezeActive) return;
+            // 보스가 활성화되어 있으면 일반 총알 스폰 차단
+            if (gameOver || gameClear || freezeActive || boss.active) return;
             
             let x, y;
             if (Math.random() < 0.5) {{
@@ -264,10 +265,10 @@ game_code = f"""
         function updateBoss(now) {{
             if (!hasBoss) return;
 
-            // 10초 이상 지나면 보스 등판 + 기존 총알 전체 제거!
+            // 10초 이상 지나면 보스 등판 + 기존 화면 총알 전체 삭제
             if (score >= 10.0 && !boss.active) {{
                 boss.active = true;
-                bullets = []; // 기존 필드 총알 초기화
+                bullets = [];
             }}
 
             if (!boss.active) return;
@@ -286,7 +287,7 @@ game_code = f"""
             // 정지 상태일 때는 공격 멈춤
             if (freezeActive) return;
 
-            // 패턴 1: 조준 사격 (0.8초 주기)
+            // 보스 패턴 1: 조준 사격 (0.8초 주기)
             if (now - boss.lastAimedShot >= 800) {{
                 boss.lastAimedShot = now;
                 const angle = Math.atan2(player.y - boss.y, player.x - boss.x);
@@ -301,7 +302,7 @@ game_code = f"""
                 }});
             }}
 
-            // 패턴 2: 360도 전방위 탄막 방출 (2.5초 주기)
+            // 보스 패턴 2: 360도 전방위 탄막 방출 (2.5초 주기)
             if (now - boss.lastRingShot >= 2500) {{
                 boss.lastRingShot = now;
                 const count = 8;
@@ -581,6 +582,6 @@ st.markdown("""
 * **`E`** : **보호막 스킬** (3초간 무적 / 쿨타임 10초)
 * **`Space` 또는 `Q`** : **시간 정지 스킬** (🪙 코인 5개 사용 시 2초간 모든 총알 멈춤)
 * **👾 보통 난이도 규칙**:
-  * **10초**: 보스 등장 (✨ **등장 시 기존 필드 총알 전멸!**)
+  * **10초**: 보스 등장 (✨ **등장 시 잡 총알 스폰 중단 및 화면 정리!**)
   * **20초**: 생존 시 스테이지 클리어!
 """)
