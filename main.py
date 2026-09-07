@@ -4,7 +4,7 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="Streamlit WASD 닷지 게임", page_icon="🎮", layout="centered")
 
 st.title("🎮 WASD 총알 피하기 게임")
-st.caption("방향키 `W`, `A`, `S`, `D`로 조종하고, `E` 키를 눌러 보호막을 펼치세요!")
+st.caption("방향키 `W, A, S, D`로 조종 | `E`: 보호막 | `Space`/`Q`: 시간 정지 (코인 3개 필요)")
 
 # 1. 목숨 개수 및 난이도 선택 UI
 col1, col2 = st.columns(2)
@@ -65,7 +65,7 @@ game_code = f"""
 </head>
 <body>
     <canvas id="gameCanvas" width="500" height="400"></canvas>
-    <div class="info">이동: <b>W, A, S, D</b> | 보호막: <b>E</b> | 재시작: <b>R</b></div>
+    <div class="info">이동: <b>W,A,S,D</b> | 보호막: <b>E</b> | 시간정지: <b>Space</b> / <b>Q</b> (코인 3개) | 재시작: <b>R</b></div>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
@@ -83,6 +83,11 @@ game_code = f"""
         let lives = maxLives;
         let invulnerable = false;
         let invulnerableTimer = 0;
+
+        let coins = [];
+        let coinCount = 0;
+        let freezeActive = false;
+        let freezeUntil = 0;
 
         const player = {{
             x: canvas.width / 2,
@@ -111,6 +116,7 @@ game_code = f"""
             const key = e.key.toLowerCase();
             if (['w', 'a', 's', 'd'].includes(key)) keys[key] = true;
             if (key === 'e' && !gameOver && !gameClear) triggerShield();
+            if ((key === ' ' || key === 'q') && !gameOver && !gameClear) triggerTimeFreeze();
             if (key === 'r' && (gameOver || gameClear)) resetGame();
         }});
 
@@ -128,8 +134,28 @@ game_code = f"""
             }}
         }}
 
+        function triggerTimeFreeze() {{
+            const now = Date.now();
+            if (coinCount >= 3 && !freezeActive) {{
+                coinCount -= 3;
+                freezeActive = true;
+                freezeUntil = now + 2000; // 2초간 정지
+            }}
+        }}
+
+        function spawnCoin() {{
+            if (gameOver || gameClear || coins.length >= 3) return;
+            coins.push({{
+                x: 30 + Math.random() * (canvas.width - 60),
+                y: 30 + Math.random() * (canvas.height - 60),
+                radius: 6
+            }});
+        }}
+
+        setInterval(spawnCoin, 3000);
+
         function spawnBullet() {{
-            if (gameOver || gameClear) return;
+            if (gameOver || gameClear || freezeActive) return;
             
             let x, y;
             if (Math.random() < 0.5) {{
@@ -188,9 +214,12 @@ game_code = f"""
             player.x = canvas.width / 2;
             player.y = canvas.height / 2;
             bullets = [];
+            coins = [];
+            coinCount = 0;
             score = 0;
             lives = maxLives;
             invulnerable = false;
+            freezeActive = false;
             gameOver = false;
             gameClear = false;
             shield.active = false;
@@ -234,6 +263,10 @@ game_code = f"""
                 invulnerable = false;
             }}
 
+            if (freezeActive && now > freezeUntil) {{
+                freezeActive = false;
+            }}
+
             if (keys.w && player.y - player.radius > 0) player.y -= player.speed;
             if (keys.s && player.y + player.radius < canvas.height) player.y += player.speed;
             if (keys.a && player.x - player.radius > 0) player.x -= player.speed;
@@ -241,7 +274,32 @@ game_code = f"""
 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // 피격 후 무적 상태 깜빡임 연출
+            // 시간 정지 배경 효과
+            if (freezeActive) {{
+                ctx.fillStyle = 'rgba(0, 150, 255, 0.1)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }}
+
+            // 코인 그리기 및 습득 판정
+            for (let i = coins.length - 1; i >= 0; i--) {{
+                const c = coins[i];
+                ctx.beginPath();
+                ctx.arc(c.x, c.y, c.radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffd700';
+                ctx.fill();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#ffaa00';
+                ctx.stroke();
+                ctx.closePath();
+
+                const dist = Math.hypot(player.x - c.x, player.y - c.y);
+                if (dist < player.radius + c.radius) {{
+                    coinCount++;
+                    coins.splice(i, 1);
+                }}
+            }}
+
+            // 플레이어 그리기
             if (!invulnerable || Math.floor(now / 100) % 2 === 0) {{
                 ctx.beginPath();
                 ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
@@ -261,34 +319,36 @@ game_code = f"""
                 ctx.closePath();
             }}
 
+            // 총알 로직 및 충돌
             for (let i = bullets.length - 1; i >= 0; i--) {{
                 const b = bullets[i];
 
-                if (b.type === 'homing') {{
-                    const targetAngle = Math.atan2(player.y - b.y, player.x - b.x);
-                    const currentAngle = Math.atan2(b.dy, b.dx);
-                    const newAngle = currentAngle + (targetAngle - currentAngle) * 0.03;
-                    b.dx = Math.cos(newAngle) * b.speed;
-                    b.dy = Math.sin(newAngle) * b.speed;
-                    b.rotation += 0.1;
+                if (!freezeActive) {{
+                    if (b.type === 'homing') {{
+                        const targetAngle = Math.atan2(player.y - b.y, player.x - b.x);
+                        const currentAngle = Math.atan2(b.dy, b.dx);
+                        const newAngle = currentAngle + (targetAngle - currentAngle) * 0.03;
+                        b.dx = Math.cos(newAngle) * b.speed;
+                        b.dy = Math.sin(newAngle) * b.speed;
+                        b.rotation += 0.1;
+                    }}
+                    b.x += b.dx;
+                    b.y += b.dy;
                 }}
 
-                b.x += b.dx;
-                b.y += b.dy;
-
                 if (b.type === 'homing') {{
-                    drawDiamond(b.x, b.y, b.radius, b.rotation, b.color);
+                    drawDiamond(b.x, b.y, b.radius, b.rotation, freezeActive ? '#888888' : b.color);
                 }} else {{
                     ctx.beginPath();
                     ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
-                    ctx.fillStyle = b.color;
+                    ctx.fillStyle = freezeActive ? '#888888' : b.color;
                     ctx.fill();
                     ctx.closePath();
                 }}
 
                 const dist = Math.hypot(player.x - b.x, player.y - b.y);
                 if (dist < player.radius + b.radius) {{
-                    if (!shield.active && !invulnerable) {{
+                    if (!shield.active && !invulnerable && !freezeActive) {{
                         lives--;
                         bullets.splice(i, 1);
                         
@@ -300,7 +360,7 @@ game_code = f"""
                             }}
                         }} else {{
                             invulnerable = true;
-                            invulnerableTimer = now + 1500; // 피격 후 1.5초 무적
+                            invulnerableTimer = now + 1500;
                         }}
                         continue;
                     }}
@@ -311,7 +371,7 @@ game_code = f"""
                 }}
             }}
 
-            // UI 표시: 시간, 최고기록, 목숨
+            // UI 표시
             ctx.fillStyle = '#ffffff';
             ctx.font = '16px sans-serif';
             if (targetTime !== null) {{
@@ -323,30 +383,40 @@ game_code = f"""
             ctx.fillStyle = '#ffbd45';
             ctx.fillText('BEST: ' + highScore.toFixed(1) + 's', 15, 52);
 
-            // 목숨(하트) 표시
             ctx.fillStyle = '#ff4b4b';
             ctx.fillText('LIFE: ' + '❤️'.repeat(lives), 15, 74);
+
+            ctx.fillStyle = '#ffd700';
+            ctx.fillText('COIN: 🪙 ' + coinCount, 15, 96);
 
             // 보호막 게이지
             const timeSinceLastUsed = now - shield.lastUsed;
             const cooldownProgress = Math.min(1, timeSinceLastUsed / shield.cooldown);
             
             ctx.fillStyle = '#333333';
-            ctx.fillRect(15, 85, 100, 8);
+            ctx.fillRect(15, 105, 100, 8);
             
             if (shield.active) {{
                 const activeProgress = (shield.activeUntil - now) / shield.duration;
                 ctx.fillStyle = '#00ffff';
-                ctx.fillRect(15, 85, 100 * activeProgress, 8);
+                ctx.fillRect(15, 105, 100 * activeProgress, 8);
                 ctx.fillStyle = '#00ffff';
                 ctx.font = '10px sans-serif';
-                ctx.fillText('SHIELD ACTIVE', 122, 93);
+                ctx.fillText('SHIELD ACTIVE', 122, 113);
             }} else {{
                 ctx.fillStyle = cooldownProgress === 1 ? '#00d4ff' : '#ffbd45';
-                ctx.fillRect(15, 85, 100 * cooldownProgress, 8);
+                ctx.fillRect(15, 105, 100 * cooldownProgress, 8);
                 ctx.fillStyle = '#8b949e';
                 ctx.font = '10px sans-serif';
-                ctx.fillText(cooldownProgress === 1 ? 'SHIELD READY (E)' : 'CHARGING...', 122, 93);
+                ctx.fillText(cooldownProgress === 1 ? 'SHIELD READY (E)' : 'CHARGING...', 122, 113);
+            }}
+
+            // 시간 정지 알림
+            if (freezeActive) {{
+                const remainFreeze = ((freezeUntil - now) / 1000).toFixed(1);
+                ctx.fillStyle = '#00ffff';
+                ctx.font = 'bold 16px sans-serif';
+                ctx.fillText('⏱️ TIME FREEZE! (' + remainFreeze + 's)', canvas.width / 2 - 80, 30);
             }}
 
             if (gameClear) {{
@@ -402,6 +472,6 @@ st.markdown("""
 ### 🕹️ 조작법 및 규칙
 * **`W, A, S, D`** : 이동 | **`R`** : 재시작
 * **`E`** : **보호막 스킬** (3초간 무적 / 쿨타임 10초)
-* **목숨 설정**: 슬라이더로 1~3개 선택 가능 (피격 시 1.5초간 무적 시간 제공)
-* 🔴 **어려움 모드 미션**: 15초 동안 총알을 피해 생존하면 **`STAGE CLEAR`** 화면이 등장합니다!
+* **`Space` 또는 `Q`** : **시간 정지 스킬** (🪙 코인 3개 사용 시 2초간 모든 총알 멈춤)
+* **🪙 코인**: 필드에 생성되는 노란색 코인을 모으세요.
 """)
