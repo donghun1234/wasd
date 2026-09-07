@@ -6,22 +6,32 @@ st.set_page_config(page_title="Streamlit WASD 닷지 게임", page_icon="🎮", 
 st.title("🎮 WASD 총알 피하기 게임")
 st.caption("방향키 `W`, `A`, `S`, `D`로 조종하고, `E` 키를 눌러 보호막을 펼치세요!")
 
-# 1. 난이도 선택 UI
-difficulty = st.radio(
-    "난이도를 선택하세요",
-    ["쉬움 (Easy)", "보통 (Normal)", "어려움 (Hard)"],
-    index=1,
-    horizontal=True
-)
+# 1. 목숨 개수 및 난이도 선택 UI
+col1, col2 = st.columns(2)
+
+with col1:
+    lives_setting = st.slider("❤️ 목숨 개수 설정", min_value=1, max_value=3, value=1, step=1)
+
+with col2:
+    difficulty = st.radio(
+        "🎯 난이도 선택",
+        ["쉬움 (Easy)", "보통 (Normal)", "어려움 (Hard - 15초 생존!)"],
+        index=2
+    )
 
 # 난이도별 게임 변수 설정
 difficulty_settings = {
-    "쉬움 (Easy)": {"spawn_rate": 400, "base_speed": 1.5, "speed_inc": 0.05, "key": "easy"},
-    "보통 (Normal)": {"spawn_rate": 250, "base_speed": 2.2, "speed_inc": 0.1, "key": "normal"},
-    "어려움 (Hard)": {"spawn_rate": 150, "base_speed": 3.0, "speed_inc": 0.2, "key": "hard"}
+    "쉬움 (Easy)": {"spawn_rate": 400, "base_speed": 1.5, "speed_inc": 0.05, "key": "easy", "target_time": "null"},
+    "보통 (Normal)": {"spawn_rate": 250, "base_speed": 2.2, "speed_inc": 0.1, "key": "normal", "target_time": "null"},
+    "어려움 (Hard - 15초 생존!)": {"spawn_rate": 150, "base_speed": 3.0, "speed_inc": 0.2, "key": "hard", "target_time": "15.0"}
 }
 
 cfg = difficulty_settings[difficulty]
+spawn_rate_val = cfg['spawn_rate']
+base_speed_val = cfg['base_speed']
+speed_inc_val = cfg['speed_inc']
+key_val = cfg['key']
+target_time_val = cfg['target_time']
 
 # 2. HTML/JS 기반 Canvas 게임 코드
 game_code = f"""
@@ -61,16 +71,19 @@ game_code = f"""
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
-        // 난이도별 로컬스토리지 키 설정
-        const storageKey = 'dodge_high_score_' + '{cfg['key']}';
+        const storageKey = 'dodge_high_score_' + '{key_val}';
         let highScore = parseFloat(localStorage.getItem(storageKey)) || 0.0;
 
-        // 난이도 세팅 변수
-        const spawnInterval = {cfg['spawn_rate']};
-        const baseBulletSpeed = {cfg['base_speed']};
-        const speedInc = {cfg['speed_inc']};
+        const spawnInterval = {spawn_rate_val};
+        const baseBulletSpeed = {base_speed_val};
+        const speedInc = {speed_inc_val};
+        const targetTime = {target_time_val};
+        const maxLives = {lives_setting};
 
-        // 플레이어 설정
+        let lives = maxLives;
+        let invulnerable = false;
+        let invulnerableTimer = 0;
+
         const player = {{
             x: canvas.width / 2,
             y: canvas.height / 2,
@@ -79,30 +92,26 @@ game_code = f"""
             color: '#00d4ff'
         }};
 
-        // 보호막 스킬 설정
         const shield = {{
             active: false,
-            duration: 3000,   // 보호막 지속 시간 (3초)
-            cooldown: 10000,  // 쿨다운 시간 (10초)
-            lastUsed: -10000, // 게임 시작 후 바로 쓸 수 있게 세팅
+            duration: 3000,
+            cooldown: 10000,
+            lastUsed: -10000,
             activeUntil: 0
         }};
 
-        // 키 상태 관리
         const keys = {{ w: false, a: false, s: false, d: false }};
-
-        // 총알 및 상태 변수
         let bullets = [];
         let score = 0;
         let gameOver = false;
+        let gameClear = false;
         let startTime = Date.now();
 
-        // 키 이벤트 리스너
         window.addEventListener('keydown', (e) => {{
             const key = e.key.toLowerCase();
             if (['w', 'a', 's', 'd'].includes(key)) keys[key] = true;
-            if (key === 'e' && !gameOver) triggerShield();
-            if (key === 'r' && gameOver) resetGame();
+            if (key === 'e' && !gameOver && !gameClear) triggerShield();
+            if (key === 'r' && (gameOver || gameClear)) resetGame();
         }});
 
         window.addEventListener('keyup', (e) => {{
@@ -110,7 +119,6 @@ game_code = f"""
             if (['w', 'a', 's', 'd'].includes(key)) keys[key] = false;
         }});
 
-        // 보호막 발동 함수
         function triggerShield() {{
             const now = Date.now();
             if (now - shield.lastUsed >= shield.cooldown) {{
@@ -120,9 +128,8 @@ game_code = f"""
             }}
         }}
 
-        // 총알 생성 함수
         function spawnBullet() {{
-            if (gameOver) return;
+            if (gameOver || gameClear) return;
             
             let x, y;
             if (Math.random() < 0.5) {{
@@ -177,20 +184,21 @@ game_code = f"""
 
         setInterval(spawnBullet, spawnInterval);
 
-        // 게임 리셋
         function resetGame() {{
             player.x = canvas.width / 2;
             player.y = canvas.height / 2;
             bullets = [];
             score = 0;
+            lives = maxLives;
+            invulnerable = false;
             gameOver = false;
+            gameClear = false;
             shield.active = false;
             shield.lastUsed = -10000;
             startTime = Date.now();
             update();
         }}
 
-        // 다이아몬드 그리기 함수
         function drawDiamond(x, y, size, angle, color) {{
             ctx.save();
             ctx.translate(x, y);
@@ -203,35 +211,45 @@ game_code = f"""
             ctx.restore();
         }}
 
-        // 메인 업데이트 및 렌더링 루프
         function update() {{
-            if (gameOver) return;
+            if (gameOver || gameClear) return;
 
             const now = Date.now();
             score = Math.floor((now - startTime) / 100) / 10;
 
-            // 보호막 상태 업데이트
+            if (targetTime !== null && score >= targetTime) {{
+                gameClear = true;
+                score = targetTime;
+                if (score > highScore) {{
+                    highScore = score;
+                    localStorage.setItem(storageKey, highScore.toFixed(1));
+                }}
+            }}
+
             if (shield.active && now > shield.activeUntil) {{
                 shield.active = false;
             }}
 
-            // 플레이어 이동
+            if (invulnerable && now > invulnerableTimer) {{
+                invulnerable = false;
+            }}
+
             if (keys.w && player.y - player.radius > 0) player.y -= player.speed;
             if (keys.s && player.y + player.radius < canvas.height) player.y += player.speed;
             if (keys.a && player.x - player.radius > 0) player.x -= player.speed;
             if (keys.d && player.x + player.radius < canvas.width) player.x += player.speed;
 
-            // 화면 초기화
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // 플레이어 그리기
-            ctx.beginPath();
-            ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
-            ctx.fillStyle = player.color;
-            ctx.fill();
-            ctx.closePath();
+            // 피격 후 무적 상태 깜빡임 연출
+            if (!invulnerable || Math.floor(now / 100) % 2 === 0) {{
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+                ctx.fillStyle = player.color;
+                ctx.fill();
+                ctx.closePath();
+            }}
 
-            // 보호막 그리기 (활성화 상태 시)
             if (shield.active) {{
                 ctx.beginPath();
                 ctx.arc(player.x, player.y, player.radius + 8, 0, Math.PI * 2);
@@ -243,7 +261,6 @@ game_code = f"""
                 ctx.closePath();
             }}
 
-            // 총알 이동 및 충돌 체크
             for (let i = bullets.length - 1; i >= 0; i--) {{
                 const b = bullets[i];
 
@@ -269,15 +286,23 @@ game_code = f"""
                     ctx.closePath();
                 }}
 
-                // 충돌 검사 (보호막 비활성화 상태일 때만 사망)
                 const dist = Math.hypot(player.x - b.x, player.y - b.y);
                 if (dist < player.radius + b.radius) {{
-                    if (!shield.active) {{
-                        gameOver = true;
-                        if (score > highScore) {{
-                            highScore = score;
-                            localStorage.setItem(storageKey, highScore.toFixed(1));
+                    if (!shield.active && !invulnerable) {{
+                        lives--;
+                        bullets.splice(i, 1);
+                        
+                        if (lives <= 0) {{
+                            gameOver = true;
+                            if (score > highScore) {{
+                                highScore = score;
+                                localStorage.setItem(storageKey, highScore.toFixed(1));
+                            }}
+                        }} else {{
+                            invulnerable = true;
+                            invulnerableTimer = now + 1500; // 피격 후 1.5초 무적
                         }}
+                        continue;
                     }}
                 }}
 
@@ -286,37 +311,61 @@ game_code = f"""
                 }}
             }}
 
-            // 현재 점수 및 최고 점수 상단 표시
+            // UI 표시: 시간, 최고기록, 목숨
             ctx.fillStyle = '#ffffff';
             ctx.font = '16px sans-serif';
-            ctx.fillText(`TIME: ${{score.toFixed(1)}}s`, 15, 30);
+            if (targetTime !== null) {{
+                ctx.fillText('TIME: ' + score.toFixed(1) + 's / ' + targetTime.toFixed(1) + 's', 15, 30);
+            }} else {{
+                ctx.fillText('TIME: ' + score.toFixed(1) + 's', 15, 30);
+            }}
             
             ctx.fillStyle = '#ffbd45';
-            ctx.fillText(`BEST: ${{highScore.toFixed(1)}}s`, 15, 52);
+            ctx.fillText('BEST: ' + highScore.toFixed(1) + 's', 15, 52);
 
-            // 보호막 쿨다운 게이지 표시
+            // 목숨(하트) 표시
+            ctx.fillStyle = '#ff4b4b';
+            ctx.fillText('LIFE: ' + '❤️'.repeat(lives), 15, 74);
+
+            // 보호막 게이지
             const timeSinceLastUsed = now - shield.lastUsed;
             const cooldownProgress = Math.min(1, timeSinceLastUsed / shield.cooldown);
             
             ctx.fillStyle = '#333333';
-            ctx.fillRect(15, 65, 100, 8);
+            ctx.fillRect(15, 85, 100, 8);
             
             if (shield.active) {{
                 const activeProgress = (shield.activeUntil - now) / shield.duration;
                 ctx.fillStyle = '#00ffff';
-                ctx.fillRect(15, 65, 100 * activeProgress, 8);
+                ctx.fillRect(15, 85, 100 * activeProgress, 8);
                 ctx.fillStyle = '#00ffff';
                 ctx.font = '10px sans-serif';
-                ctx.fillText('SHIELD ACTIVE', 122, 73);
+                ctx.fillText('SHIELD ACTIVE', 122, 93);
             }} else {{
                 ctx.fillStyle = cooldownProgress === 1 ? '#00d4ff' : '#ffbd45';
-                ctx.fillRect(15, 65, 100 * cooldownProgress, 8);
+                ctx.fillRect(15, 85, 100 * cooldownProgress, 8);
                 ctx.fillStyle = '#8b949e';
                 ctx.font = '10px sans-serif';
-                ctx.fillText(cooldownProgress === 1 ? 'SHIELD READY (E)' : 'CHARGING...', 122, 73);
+                ctx.fillText(cooldownProgress === 1 ? 'SHIELD READY (E)' : 'CHARGING...', 122, 93);
             }}
 
-            if (gameOver) {{
+            if (gameClear) {{
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                ctx.fillStyle = '#00ff88';
+                ctx.font = 'bold 32px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('🎉 STAGE CLEAR! 🎉', canvas.width / 2, canvas.height / 2 - 20);
+
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '16px sans-serif';
+                ctx.fillText('어려움 모드 15초 생존 성공!', canvas.width / 2, canvas.height / 2 + 15);
+
+                ctx.fillStyle = '#8b949e';
+                ctx.fillText('R 키를 눌러 다시 도전', canvas.width / 2, canvas.height / 2 + 60);
+                ctx.textAlign = 'start';
+            }} else if (gameOver) {{
                 ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -327,10 +376,10 @@ game_code = f"""
 
                 ctx.fillStyle = '#ffffff';
                 ctx.font = '16px sans-serif';
-                ctx.fillText(`최종 생존 시간: ${{score.toFixed(1)}}초`, canvas.width / 2, canvas.height / 2 + 15);
+                ctx.fillText('최종 생존 시간: ' + score.toFixed(1) + '초', canvas.width / 2, canvas.height / 2 + 15);
                 
                 ctx.fillStyle = '#ffbd45';
-                ctx.fillText(`최고 기록: ${{highScore.toFixed(1)}}초`, canvas.width / 2, canvas.height / 2 + 40);
+                ctx.fillText('최고 기록: ' + highScore.toFixed(1) + '초', canvas.width / 2, canvas.height / 2 + 40);
 
                 ctx.fillStyle = '#8b949e';
                 ctx.fillText('R 키를 눌러 다시 시작', canvas.width / 2, canvas.height / 2 + 75);
@@ -340,21 +389,19 @@ game_code = f"""
             }}
         }}
 
-        // 게임 시작
         update();
     </script>
 </body>
 </html>
 """
 
-# Streamlit 컴포넌트로 게임 탑재
 components.html(game_code, height=480)
 
-# 가이드 섹션
 st.markdown("""
 ---
-### 🕹️ 조작법 및 스킬
+### 🕹️ 조작법 및 규칙
 * **`W, A, S, D`** : 이동 | **`R`** : 재시작
 * **`E`** : **보호막 스킬** (3초간 무적 / 쿨타임 10초)
-* 좌측 상단의 게이지를 통해 보호막 남은 시간 및 충전 상태를 확인할 수 있습니다.
+* **목숨 설정**: 슬라이더로 1~3개 선택 가능 (피격 시 1.5초간 무적 시간 제공)
+* 🔴 **어려움 모드 미션**: 15초 동안 총알을 피해 생존하면 **`STAGE CLEAR`** 화면이 등장합니다!
 """)
