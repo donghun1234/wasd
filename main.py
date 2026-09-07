@@ -4,7 +4,7 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="Streamlit WASD 닷지 게임", page_icon="🎮", layout="centered")
 
 st.title("🎮 WASD 총알 피하기 게임")
-st.caption("방향키 `W, A, S, D`로 조종 | `E`: 보호막 | `Space`/`Q`: 시간 정지 (코인 3개 필요)")
+st.caption("방향키 `W, A, S, D`로 조종 | `E`: 보호막 | `Space`/`Q`: 시간 정지 (코인 5개 필요)")
 
 # 1. 목숨 개수 및 난이도 선택 UI
 col1, col2 = st.columns(2)
@@ -65,14 +65,17 @@ game_code = f"""
 </head>
 <body>
     <canvas id="gameCanvas" width="500" height="400"></canvas>
-    <div class="info">이동: <b>W,A,S,D</b> | 보호막: <b>E</b> | 시간정지: <b>Space</b> / <b>Q</b> (코인 3개) | 재시작: <b>R</b></div>
+    <div class="info">이동: <b>W,A,S,D</b> | 보호막: <b>E</b> | 시간정지: <b>Space</b> / <b>Q</b> (코인 5개) | 재시작: <b>R</b></div>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
         const storageKey = 'dodge_high_score_' + '{key_val}';
+        const coinStorageKey = 'dodge_total_coins';
+
         let highScore = parseFloat(localStorage.getItem(storageKey)) || 0.0;
+        let coinCount = parseInt(localStorage.getItem(coinStorageKey)) || 0; // 누적 코인 로드
 
         const spawnInterval = {spawn_rate_val};
         const baseBulletSpeed = {base_speed_val};
@@ -85,7 +88,6 @@ game_code = f"""
         let invulnerableTimer = 0;
 
         let coins = [];
-        let coinCount = 0;
         let freezeActive = false;
         let freezeUntil = 0;
 
@@ -136,8 +138,9 @@ game_code = f"""
 
         function triggerTimeFreeze() {{
             const now = Date.now();
-            if (coinCount >= 3 && !freezeActive) {{
-                coinCount -= 3;
+            if (coinCount >= 5 && !freezeActive) {{
+                coinCount -= 5;
+                localStorage.setItem(coinStorageKey, coinCount); // 사용 후 누적 코인 저장
                 freezeActive = true;
                 freezeUntil = now + 2000; // 2초간 정지
             }}
@@ -215,7 +218,6 @@ game_code = f"""
             player.y = canvas.height / 2;
             bullets = [];
             coins = [];
-            coinCount = 0;
             score = 0;
             lives = maxLives;
             invulnerable = false;
@@ -295,6 +297,7 @@ game_code = f"""
                 const dist = Math.hypot(player.x - c.x, player.y - c.y);
                 if (dist < player.radius + c.radius) {{
                     coinCount++;
+                    localStorage.setItem(coinStorageKey, coinCount); // 코인 습득 즉시 누적 저장
                     coins.splice(i, 1);
                 }}
             }}
@@ -472,6 +475,6 @@ st.markdown("""
 ### 🕹️ 조작법 및 규칙
 * **`W, A, S, D`** : 이동 | **`R`** : 재시작
 * **`E`** : **보호막 스킬** (3초간 무적 / 쿨타임 10초)
-* **`Space` 또는 `Q`** : **시간 정지 스킬** (🪙 코인 3개 사용 시 2초간 모든 총알 멈춤)
-* **🪙 코인**: 필드에 생성되는 노란색 코인을 모으세요.
+* **`Space` 또는 `Q`** : **시간 정지 스킬** (🪙 코인 5개 사용 시 2초간 모든 총알 멈춤)
+* **🪙 누적 코인**: 필드의 코인을 먹으면 차곡차곡 누적되어 기록이 남습니다!
 """)
