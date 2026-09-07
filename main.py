@@ -93,16 +93,18 @@ game_code = f"""
         let freezeActive = false;
         let freezeUntil = 0;
 
-        // 보스 정보
+        // 보스 정보 및 강화된 패턴 상태 변수
         const boss = {{
             active: false,
             x: canvas.width / 2,
             y: -50,
             targetY: 70,
             radius: 24,
-            dx: 2,
+            dx: 3.5,
             lastAimedShot: 0,
-            lastRingShot: 0
+            lastSpiralShot: 0,
+            lastRingShot: 0,
+            spiralAngle: 0
         }};
 
         const player = {{
@@ -245,7 +247,9 @@ game_code = f"""
             boss.x = canvas.width / 2;
             boss.y = -50;
             boss.lastAimedShot = 0;
+            boss.lastSpiralShot = 0;
             boss.lastRingShot = 0;
+            boss.spiralAngle = 0;
             startTime = Date.now();
             update();
         }}
@@ -277,9 +281,9 @@ game_code = f"""
             if (boss.y < boss.targetY) {{
                 boss.y += 2;
             }} else {{
-                // 좌우 이동 패턴
+                // 좌우 이동 패턴 (속도 증가)
                 boss.x += boss.dx;
-                if (boss.x - boss.radius < 20 || boss.x + boss.radius > canvas.width - 20) {{
+                if (boss.x - boss.radius < 30 || boss.x + boss.radius > canvas.width - 30) {{
                     boss.dx *= -1;
                 }}
             }}
@@ -287,37 +291,76 @@ game_code = f"""
             // 정지 상태일 때는 공격 멈춤
             if (freezeActive) return;
 
-            // 보스 패턴 1: 조준 사격 (0.8초 주기)
-            if (now - boss.lastAimedShot >= 800) {{
+            // 🔥 패턴 1: 빠른 조준 사격 (0.5초 주기)
+            if (now - boss.lastAimedShot >= 500) {{
                 boss.lastAimedShot = now;
                 const angle = Math.atan2(player.y - boss.y, player.x - boss.x);
                 bullets.push({{
                     x: boss.x,
                     y: boss.y,
-                    dx: Math.cos(angle) * 3.5,
-                    dy: Math.sin(angle) * 3.5,
-                    radius: 7,
+                    dx: Math.cos(angle) * 4.2,
+                    dy: Math.sin(angle) * 4.2,
+                    radius: 6,
                     color: '#ff0055',
                     type: 'boss_aimed'
                 }});
             }}
 
-            // 보스 패턴 2: 360도 전방위 탄막 방출 (2.5초 주기)
-            if (now - boss.lastRingShot >= 2500) {{
+            // 🔥 패턴 2: 나선형 회전 연사 탄막 (0.15초 주기)
+            if (now - boss.lastSpiralShot >= 150) {{
+                boss.lastSpiralShot = now;
+                boss.spiralAngle += 0.35; // 회전 각도 증가
+                
+                // 2갈래 나선 발사
+                for (let i = 0; i < 2; i++) {{
+                    const angle = boss.spiralAngle + (i * Math.PI);
+                    bullets.push({{
+                        x: boss.x,
+                        y: boss.y,
+                        dx: Math.cos(angle) * 2.8,
+                        dy: Math.sin(angle) * 2.8,
+                        radius: 5,
+                        color: '#00ffcc',
+                        type: 'boss_spiral'
+                    }});
+                }}
+            }}
+
+            // 🔥 패턴 3: 12방향 2중 링 탄막 (2.2초 주기)
+            if (now - boss.lastRingShot >= 2200) {{
                 boss.lastRingShot = now;
-                const count = 8;
+                const count = 12; // 12방향으로 강화
+                
+                // 1차 링
                 for (let i = 0; i < count; i++) {{
                     const angle = (Math.PI * 2 / count) * i;
                     bullets.push({{
                         x: boss.x,
                         y: boss.y,
-                        dx: Math.cos(angle) * 2.5,
-                        dy: Math.sin(angle) * 2.5,
+                        dx: Math.cos(angle) * 2.2,
+                        dy: Math.sin(angle) * 2.2,
                         radius: 6,
                         color: '#aa00ff',
                         type: 'boss_ring'
                     }});
                 }}
+
+                // 2차 시차 링 (약간 늦게 촘촘히 좁혀 들어옴)
+                setTimeout(() => {{
+                    if (!boss.active || gameOver || gameClear) return;
+                    for (let i = 0; i < count; i++) {{
+                        const angle = (Math.PI * 2 / count) * i + (Math.PI / count);
+                        bullets.push({{
+                            x: boss.x,
+                            y: boss.y,
+                            dx: Math.cos(angle) * 2.6,
+                            dy: Math.sin(angle) * 2.6,
+                            radius: 5,
+                            color: '#ff9900',
+                            type: 'boss_ring2'
+                        }});
+                    }}
+                }}, 150);
             }}
         }}
 
@@ -329,16 +372,22 @@ game_code = f"""
             ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2);
             ctx.fillStyle = freezeActive ? '#555555' : '#8a2be2';
             ctx.fill();
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#ff0055';
+            ctx.lineWidth = 4;
             ctx.stroke();
             ctx.closePath();
 
-            // 보스 눈 그리기
+            // 보스 분노한 눈 그리기
+            ctx.fillStyle = '#ffff00';
+            ctx.beginPath();
+            ctx.arc(boss.x - 9, boss.y - 4, 5, 0, Math.PI * 2);
+            ctx.arc(boss.x + 9, boss.y - 4, 5, 0, Math.PI * 2);
+            ctx.fill();
+            
             ctx.fillStyle = '#ff0000';
             ctx.beginPath();
-            ctx.arc(boss.x - 8, boss.y - 4, 4, 0, Math.PI * 2);
-            ctx.arc(boss.x + 8, boss.y - 4, 4, 0, Math.PI * 2);
+            ctx.arc(boss.x - 9, boss.y - 4, 2, 0, Math.PI * 2);
+            ctx.arc(boss.x + 9, boss.y - 4, 2, 0, Math.PI * 2);
             ctx.fill();
             ctx.restore();
         }}
@@ -538,7 +587,7 @@ game_code = f"""
 
                 ctx.fillStyle = '#ffffff';
                 ctx.font = '16px sans-serif';
-                ctx.fillText('보스 탄막을 뚫고 20초 생존 성공!', canvas.width / 2, canvas.height / 2 + 15);
+                ctx.fillText('강력한 보스 탄막을 뚫고 20초 생존 성공!', canvas.width / 2, canvas.height / 2 + 15);
 
                 ctx.fillStyle = '#8b949e';
                 ctx.fillText('R 키를 눌러 다시 도전', canvas.width / 2, canvas.height / 2 + 60);
@@ -577,11 +626,12 @@ components.html(game_code, height=480)
 
 st.markdown("""
 ---
-### 🕹️ 조작법 및 규칙
+### 🕹️ 조작법 및 스킬
 * **`W, A, S, D`** : 이동 | **`R`** : 재시작
 * **`E`** : **보호막 스킬** (3초간 무적 / 쿨타임 10초)
 * **`Space` 또는 `Q`** : **시간 정지 스킬** (🪙 코인 5개 사용 시 2초간 모든 총알 멈춤)
-* **👾 보통 난이도 규칙**:
-  * **10초**: 보스 등장 (✨ **등장 시 잡 총알 스폰 중단 및 화면 정리!**)
-  * **20초**: 생존 시 스테이지 클리어!
+* **👾 보통 난이도 (보스 패턴 강화)**:
+  * 🔴 **조준 사격**: 0.5초마다 플레이어를 향해 빠른 직선 발사
+  * 🟢 **나선형 회전 연사**: 0.15초마다 360도로 돌아가는 미친 탄막 발사
+  * 🟣 **12방향 2중 링 탄막**: 2.2초마다 시차를 두고 2열 탄막 방출
 """)
